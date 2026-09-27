@@ -1,0 +1,11 @@
+{
+  "mqtt_host": "0.0.0.0",
+  "mqtt_port": 1883,
+  "web_host": "0.0.0.0",
+  "web_port": 8090,
+  "allow_anonymous": true,
+  "username": "",
+  "password": "",
+  "max_log_entries": 500,
+  "client_timeout_seconds": 90
+}

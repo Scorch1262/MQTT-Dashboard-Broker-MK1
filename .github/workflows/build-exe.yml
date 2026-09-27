@@ -1,0 +1,102 @@
+name: Build EXE and macOS App
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build Windows EXE
+        run: |
+          pyinstaller --onefile --name MQTT-Monitor-Dashboard --add-data "config.json;." app.py
+
+      - name: Stage output
+        run: |
+          mkdir dist_win
+          copy dist\MQTT-Monitor-Dashboard.exe dist_win\
+          copy config.json dist_win\
+          copy README.md dist_win\ 2>NUL || echo skip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: dist_win/
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build macOS app (ARM64)
+        run: |
+          pyinstaller --windowed --name "MQTT-Monitor-Dashboard" --add-data "config.json:." app.py
+
+      - name: Stage output
+        run: |
+          mkdir -p dist_mac
+          cp -R "dist/MQTT-Monitor-Dashboard.app" dist_mac/
+          cp config.json dist_mac/
+          [ -f README.md ] && cp README.md dist_mac/ || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-app
+          path: dist_mac/
+
+  package-release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-exe
+          path: windows-exe
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-app
+          path: macos-app
+
+      - name: Zip artifacts
+        run: |
+          cd windows-exe && zip -r ../MQTT-Monitor-Dashboard-windows.zip . && cd ..
+          cd macos-app && zip -r ../MQTT-Monitor-Dashboard-macos.zip . && cd ..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            MQTT-Monitor-Dashboard-windows.zip
+            MQTT-Monitor-Dashboard-macos.zip
