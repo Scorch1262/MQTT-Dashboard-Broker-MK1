@@ -1,5 +1,7 @@
 # MQTT-Monitor-Dashboard-MK1
 
+![Bild](mqtt-dashboard-beispiel.png)
+
 Einzeldatei-Flask-Anwendung nach dem Design-Vorbild von "BambuLab-MQTT-Dashboard-MK6".
 Stellt einen eingebetteten MQTT-Broker im lokalen Netzwerk bereit und stellt alle
 eintreffenden Pakete/Topics live als Knotengraph ("MQTT-Diagramm") dar: Broker in
