@@ -9,7 +9,7 @@ der Mitte, Clients und Topics als Knoten drumherum, Verbindungslinien pulsieren
 bei jedem Paket. Darunter Client-/Topic-Tabellen sowie ein chronologisches
 Paket-Log.
 
-Aktuelle Version: **v1.0.0**
+Aktuelle Version: **v1.0.1**
 
 ## Lokaler Start
 
@@ -62,7 +62,17 @@ den Broker automatisch neu (bestehende Verbindungen werden dabei getrennt).
   ohne externe JS-Bibliotheken (Offline-faehig, wichtig fuer die gepackte
   EXE/App ohne Internetzugriff)
 
-## Bekannte Vereinfachungen (v1.0.0)
+## Fehlerbehandlung beim Start
+
+Ist der Web-Port (Standard `8090`) bereits belegt - meistens, weil noch eine
+vorherige Instanz des Programms im Hintergrund laeuft - beendet sich das
+Programm nicht mehr stillschweigend. Stattdessen erscheint eine klare
+Meldung, ein `error.log` wird neben der EXE/App geschrieben, und (sofern
+interaktiv gestartet) wartet das Fenster auf Enter statt sich sofort zu
+schliessen. Ist stattdessen nur der MQTT-Port belegt, startet die Web-UI
+trotzdem und zeigt den Broker-Status als `ERROR` mit Fehlertext an.
+
+## Bekannte Vereinfachungen
 
 - Abonnements werden als literale Topic-Filter dargestellt (z. B. `home/#`
   erscheint als eigener Knoten); eine Aufloesung von Wildcards gegen einzelne

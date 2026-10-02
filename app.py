@@ -19,9 +19,11 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import sys
 import threading
 import time
+import traceback
 from collections import deque
 from dataclasses import dataclass
 
@@ -31,7 +33,7 @@ from amqtt.broker import Broker
 from amqtt.plugins.authentication import BaseAuthPlugin
 from amqtt.plugins.base import BasePlugin
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 # ---------------------------------------------------------------------------
 # Pfade / Konfiguration
@@ -46,6 +48,7 @@ def _base_dir() -> str:
 
 BASE_DIR = _base_dir()
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+ERROR_LOG_PATH = os.path.join(BASE_DIR, "error.log")
 
 DEFAULT_CONFIG = {
     "mqtt_host": "0.0.0.0",
@@ -82,6 +85,45 @@ def save_config(cfg: dict) -> None:
             json.dump(cfg, f, indent=2, ensure_ascii=False)
     except Exception as exc:  # noqa: BLE001
         log.warning("config.json konnte nicht geschrieben werden (%s)", exc)
+
+
+# ---------------------------------------------------------------------------
+# Robuster Start: Port-Kollisionen und unerwartete Fehler duerfen das Programm
+# nicht stillschweigend beenden (vor allem bei der gepackten EXE/App, wo das
+# Konsolenfenster sich beim Absturz sofort wieder schliesst).
+# ---------------------------------------------------------------------------
+
+def _port_is_taken(host: str, port: int) -> bool:
+    """Prueft per echtem Verbindungsversuch, ob am Port bereits jemand lauscht
+    (z. B. eine noch laufende vorherige Instanz dieses Programms)."""
+    probe_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    try:
+        with socket.create_connection((probe_host, port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def _fatal_exit(message: str) -> None:
+    """Zeigt einen Fehler klar an, schreibt ihn in error.log und wartet auf
+    Enter, bevor das Programm beendet wird - verhindert, dass ein per
+    Doppelklick gestartetes Fenster kommentarlos wieder verschwindet."""
+    log.error(message)
+    try:
+        with open(ERROR_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
+    except Exception:  # noqa: BLE001
+        pass
+    print("\n" + "=" * 70)
+    print("FEHLER: " + message)
+    print("Details wurden in error.log geschrieben.")
+    print("=" * 70)
+    if sys.stdin is not None and sys.stdin.isatty():
+        try:
+            input("\nDruecke Enter zum Beenden...")
+        except Exception:  # noqa: BLE001
+            pass
+    sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -374,6 +416,16 @@ class BrokerRunner:
         try:
             self.broker = Broker(amqtt_config)
             await self.broker.start()
+        except OSError as exc:
+            if exc.errno in (98, 48, 10048):  # Adresse bereits belegt (Linux/macOS/Windows)
+                msg = (f"MQTT-Port {cfg['mqtt_port']} ist bereits belegt - laeuft eventuell "
+                       f"schon eine andere Instanz dieses Programms oder ein anderer MQTT-Broker? "
+                       f"Port in der Konfiguration aendern oder die andere Instanz beenden.")
+            else:
+                msg = f"Broker konnte nicht gestartet werden: {exc}"
+            log.error(msg)
+            STATE.set_status("error", msg)
+            return
         except Exception as exc:  # noqa: BLE001
             log.exception("Broker konnte nicht gestartet werden")
             STATE.set_status("error", str(exc))
@@ -848,12 +900,41 @@ draw();
 
 
 def main() -> None:
-    RUNNER.start()
     web_host = STATE.config.get("web_host", "0.0.0.0")
     web_port = STATE.config.get("web_port", 8090)
+
+    # Vorab pruefen statt blind binden: Flask/Werkzeug beendet den Prozess bei
+    # einem belegten Port sonst sofort und stillschweigend ueber sys.exit(1) -
+    # typischerweise, wenn eine vorherige Instanz (aus der auch die bereits
+    # vorhandene config.json stammt) noch im Hintergrund laeuft.
+    if _port_is_taken(web_host, web_port):
+        _fatal_exit(
+            f"Web-Port {web_port} ist bereits belegt - laeuft das Dashboard eventuell schon? "
+            f"Oeffne http://localhost:{web_port} im Browser, oder beende die laufende Instanz "
+            f"(z. B. im Task-Manager/Activity Monitor) und starte erneut. Alternativ den "
+            f"Web-Port in config.json aendern."
+        )
+        return
+
+    RUNNER.start()
     log.info("Web-UI auf http://%s:%s", web_host, web_port)
-    app.run(host=web_host, port=web_port, debug=False, use_reloader=False, threaded=True)
+    try:
+        app.run(host=web_host, port=web_port, debug=False, use_reloader=False, threaded=True)
+    except SystemExit:
+        # Werkzeug faengt Bind-Fehler selbst ab und ruft sys.exit(1) auf -
+        # trotz der Vorab-Pruefung oben als letztes Sicherheitsnetz abfangen.
+        _fatal_exit(
+            f"Der Web-Server konnte Port {web_port} nicht belegen (Adresse bereits in Benutzung "
+            f"oder keine Berechtigung). Web-Port in config.json aendern und erneut starten."
+        )
+    except OSError as exc:
+        _fatal_exit(f"Web-Server konnte nicht gestartet werden: {exc}")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        _fatal_exit(f"Unerwarteter Fehler beim Start:\n{traceback.format_exc()}")

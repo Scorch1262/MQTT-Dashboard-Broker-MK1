@@ -38,10 +38,18 @@ jobs:
           copy config.json dist_win\
           copy README.md dist_win\ 2>NUL || echo skip
 
+      - name: Zip output
+        run: powershell Compress-Archive -Path dist_win\* -DestinationPath MQTT-Monitor-Dashboard-windows.zip
+
+      # Nur bei Tag-Push oder manuellem Start wird das Artefakt tatsaechlich
+      # gespeichert (Speicherkontingent!) - ein normaler Push baut nur zur
+      # Fehlerpruefung, ohne Speicher zu verbrauchen.
       - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         with:
           name: windows-exe
-          path: dist_win/
+          path: MQTT-Monitor-Dashboard-windows.zip
+          retention-days: 5
 
   build-macos:
     runs-on: macos-latest
@@ -69,16 +77,27 @@ jobs:
           cp config.json dist_mac/
           [ -f README.md ] && cp README.md dist_mac/ || true
 
+      - name: Zip output
+        run: |
+          cd dist_mac && zip -rq ../MQTT-Monitor-Dashboard-macos.zip . && cd ..
+
+      # Nur bei Tag-Push oder manuellem Start wird das Artefakt tatsaechlich
+      # gespeichert (Speicherkontingent!) - ein normaler Push baut nur zur
+      # Fehlerpruefung, ohne Speicher zu verbrauchen.
       - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         with:
           name: macos-app
-          path: dist_mac/
+          path: MQTT-Monitor-Dashboard-macos.zip
+          retention-days: 5
 
   package-release:
     needs: [build-windows, build-macos]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
+      # windows-exe/macos-app enthalten bereits die fertigen ZIPs (siehe
+      # vorherige Jobs) - hier nur einsammeln, kein erneutes Zippen noetig.
       - uses: actions/download-artifact@v4
         with:
           name: windows-exe
@@ -89,10 +108,10 @@ jobs:
           name: macos-app
           path: macos-app
 
-      - name: Zip artifacts
+      - name: Zip-Dateien an bekannten Ort legen
         run: |
-          cd windows-exe && zip -r ../MQTT-Monitor-Dashboard-windows.zip . && cd ..
-          cd macos-app && zip -r ../MQTT-Monitor-Dashboard-macos.zip . && cd ..
+          mv windows-exe/MQTT-Monitor-Dashboard-windows.zip .
+          mv macos-app/MQTT-Monitor-Dashboard-macos.zip .
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
